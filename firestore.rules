@@ -1,0 +1,84 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isEmailVerified() { return request.auth.token.email_verified == true; }
+    function isAdmin() { 
+      return isSignedIn() && (
+        request.auth.token.email == 'agostinhofasenda4@gmail.com' || 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // --- User Profile Rules ---
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Standard creation: only set basic fields, balance 0
+      allow create: if isOwner(userId) 
+        && incoming().balance == 0
+        && incoming().ownedVips == ['estagiario']
+        && incoming().phoneNumber is string
+        && incoming().createdAt == request.time;
+
+      allow update: if isOwner(userId) && (
+        // Action: Update registration day counter (if we do this via client)
+        (incoming().diff(existing()).affectedKeys().hasOnly(['estagiarioUsedDays', 'lastTaskDate']) && 
+         incoming().estagiarioUsedDays <= 2) ||
+        // Action: System update (balance) - Normally handled by backend, but here we allow restricted increments
+        // if we were doing it pure client side. But better to restrict to server or Admin.
+        isAdmin()
+      );
+    }
+
+    // --- Deposit Rules ---
+    match /deposits/{depositId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() 
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().amount > 0
+        && (incoming().transactionCode is string || !('transactionCode' in incoming()))
+        && incoming().createdAt == request.time;
+      
+      allow update: if isAdmin() && incoming().diff(existing()).affectedKeys().hasAny(['status']);
+    }
+
+    // --- Withdrawal Rules ---
+    match /withdrawals/{withdrawalId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() 
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().amount >= 90
+        && incoming().createdAt == request.time;
+      
+      allow update: if isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+    }
+
+    // --- Task History / Rewards ---
+    match /task_history/{taskId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      
+      // Critical: Task creation is the "claim" event.
+      // In a real app, you'd want an existAfter to update user balance atomically.
+      allow create: if isSignedIn() 
+        && incoming().userId == request.auth.uid
+        && incoming().reward > 0
+        && incoming().completedAt == request.time
+        && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid))
+        // Relational Sync: Ensure user is allowed (estagiario check or VIP check)
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownedVips.hasAny([incoming().levelKey]);
+    }
+  }
+}

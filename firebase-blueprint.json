@@ -1,0 +1,80 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile containing balance and subscription status",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "balance": { "type": "number" },
+        "ownedVips": { "type": "array", "items": { "type": "string" } },
+        "estagiarioUsedDays": { "type": "number" },
+        "lastTaskDate": { "type": "string", "format": "date" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["phoneNumber", "balance", "ownedVips"]
+    },
+    "Deposit": {
+      "title": "Deposit",
+      "description": "Deposit request for account funding",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "method": { "type": "string", "enum": ["mpesa", "emola", "mkesh"] },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "proofUrl": { "type": "string" },
+        "transactionCode": { "type": "string" },
+        "vipLevelKey": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "status", "createdAt"]
+    },
+    "Withdrawal": {
+      "title": "Withdrawal",
+      "description": "Withdrawal request",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "method": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved"] },
+        "phoneNumber": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "status", "createdAt"]
+    },
+    "TaskHistory": {
+      "title": "Task History",
+      "description": "Record of a completed task",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "levelKey": { "type": "string" },
+        "reward": { "type": "number" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "date", "levelKey", "reward", "completedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Primary user documents"
+    },
+    "deposits/{depositId}": {
+      "schema": "Deposit",
+      "description": "Deposit history and state"
+    },
+    "withdrawals/{withdrawalId}": {
+      "schema": "Withdrawal",
+      "description": "Withdrawal history and state"
+    },
+    "task_history/{taskId}": {
+      "schema": "TaskHistory",
+      "description": "Daily task completion logs"
+    }
+  }
+}
