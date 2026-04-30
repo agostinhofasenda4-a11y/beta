@@ -998,9 +998,10 @@ function TaskCenter({ user, userData, setView }: { user: FirebaseUser, userData:
       <AnimatePresence>
         {activeTask && activeLevel && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 bg-black/90 flex flex-col justify-end" style={{ paddingBottom: "80px" }}>
+            className="fixed inset-0 z-40 bg-black/90 flex items-end justify-center" style={{ paddingBottom: "88px" }}>
             <motion.div initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
-              className="bg-[#111] border border-white/10 w-full max-w-md overflow-hidden rounded-2xl mx-3 mb-2">
+              className="bg-[#111] border border-white/10 w-full max-w-sm overflow-hidden rounded-t-3xl"
+              style={{ marginLeft: "auto", marginRight: "auto" }}>
               <div className="relative overflow-hidden bg-[#0a0a0a]" style={{ height: "210px" }}>
                 <img src={activeTask.img} alt={activeTask.name} className="w-full h-full object-cover"
                   onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
