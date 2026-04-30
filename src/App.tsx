@@ -575,152 +575,37 @@ function InvestView({ user, setView }: { user: any, setView: (v: AppState) => vo
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; ok: boolean; vip?: string } | null>(null);
 
-  // ── Task state (inline, no navigation needed) ──
-  const [activeLevel, setActiveLevel] = useState<string | null>(null);
-  const [activeTask, setActiveTask] = useState<any>(null);
-  const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [dailyCounts, setDailyCounts] = useState<Record<string, number>>({});
-  const [lastReward, setLastReward] = useState<number | null>(null);
-  const [showReward, setShowReward] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const today = format(new Date(), "yyyy-MM-dd");
-  const isEstagiarioOnly = user.ownedVips?.length === 1 && user.ownedVips[0] === "estagiario";
-
-  useEffect(() => {
-    const { currentUser } = auth;
-    if (!currentUser) return;
-    const q = query(collection(db, "task_history"), where("userId", "==", currentUser.uid), where("date", "==", today));
-    return onSnapshot(q, snap => {
-      const counts: Record<string, number> = {};
-      snap.docs.forEach(d => { const lk = d.data().levelKey; counts[lk] = (counts[lk] || 0) + 1; });
-      setDailyCounts(counts);
-    });
-  }, [today]);
-
   const handlePurchase = async (v: typeof VIP_LEVELS[0]) => {
     if (purchasing) return;
+    // Check balance
     if ((user.balance || 0) < v.cost) {
-      setMsg({ text: `Saldo insuficiente. Faltam ${(v.cost - user.balance).toFixed(0)} MZN.`, ok: false, vip: v.key });
+      setMsg({ text: `Saldo insuficiente. Precisa de mais ${(v.cost - user.balance).toFixed(0)} MZN. Recarregue a sua conta.`, ok: false, vip: v.key });
       return;
     }
     setPurchasing(v.key);
     try {
+      const userRef = doc(db, "users", user.uid || "");
+      // Get current user uid from auth
       const { currentUser } = auth;
       if (!currentUser) throw new Error("Não autenticado");
       const uRef = doc(db, "users", currentUser.uid);
       const snap = await getDoc(uRef);
       const current: string[] = snap.data()?.ownedVips || [];
       if (!current.includes(v.key)) {
-        await updateDoc(uRef, { ownedVips: [...current, v.key], balance: increment(-v.cost) });
+        await updateDoc(uRef, {
+          ownedVips: [...current, v.key],
+          balance: increment(-v.cost),
+        });
       }
-      setMsg({ text: `${v.name} activado! Clica em "Fazer Tarefas" para começar.`, ok: true, vip: v.key });
-    } catch (e: any) { setMsg({ text: "Erro: " + e.message, ok: false }); }
+      setMsg({ text: `${v.name} activado com sucesso! Já podes fazer as tarefas.`, ok: true, vip: v.key });
+    } catch (e: any) {
+      setMsg({ text: "Erro: " + e.message, ok: false });
+    }
     setPurchasing(null);
-  };
-
-  const openTask = (levelKey: string) => {
-    const level = VIP_LEVELS.find(v => v.key === levelKey)!;
-    if ((dailyCounts[levelKey] || 0) >= level.tasks) return;
-    setActiveLevel(levelKey);
-    setActiveTask({
-      ...FASHION_LOOKS[Math.floor(Math.random() * FASHION_LOOKS.length)],
-      question: LOOK_QUESTIONS[Math.floor(Math.random() * LOOK_QUESTIONS.length)]
-    });
-    setProgress(0);
-  };
-
-  const handleVote = (_liked: boolean) => {
-    setProcessing(true);
-    let p = 0;
-    intervalRef.current = setInterval(() => {
-      p += 1; setProgress(Math.min(p, 100));
-      if (p >= 100) { if (intervalRef.current) clearInterval(intervalRef.current); finishTask(); }
-    }, 100);
-  };
-
-  const finishTask = async () => {
-    if (!activeLevel) return;
-    const { currentUser } = auth;
-    if (!currentUser) return;
-    const level = VIP_LEVELS.find(v => v.key === activeLevel)!;
-    try {
-      await Promise.all([
-        addDoc(collection(db, "task_history"), { userId: currentUser.uid, date: today, levelKey: activeLevel, reward: level.perTask, completedAt: serverTimestamp() }),
-        updateDoc(doc(db, "users", currentUser.uid), { balance: increment(level.perTask), lastTaskDate: today, ...(isEstagiarioOnly ? { estagiarioUsedDays: increment(1) } : {}) })
-      ]);
-      if (user.referredBy) {
-        const bonus = level.perTask * 0.15;
-        await updateDoc(doc(db, "users", user.referredBy), { balance: increment(bonus), referralEarnings: increment(bonus) });
-      }
-      setLastReward(level.perTask); setShowReward(true);
-      setTimeout(() => setShowReward(false), 2500);
-    } catch (e) { console.error(e); }
-    setProcessing(false); setActiveTask(null); setActiveLevel(null);
   };
 
   return (
     <div className="p-4 space-y-4">
-      {/* Reward popup */}
-      <AnimatePresence>
-        {showReward && (
-          <motion.div initial={{ opacity: 0, y: -20, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-            className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-[#C9A84C] text-black px-6 py-3 font-bold text-lg shadow-2xl rounded-full">
-            +{lastReward?.toFixed(2)} MZN ✓
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Task modal — opens directly without leaving the page */}
-      <AnimatePresence>
-        {activeTask && activeLevel && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 bg-black/90 flex items-end justify-center">
-            <motion.div initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
-              className="bg-[#111] border border-white/10 w-full max-w-md overflow-hidden rounded-t-3xl">
-              <div className="relative overflow-hidden bg-[#0a0a0a]" style={{ height: "260px" }}>
-                <img src={activeTask.img} alt={activeTask.name} className="w-full h-full object-cover"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                <div className="absolute bottom-3 left-4 right-4 flex justify-between items-end">
-                  <p className="text-white font-serif text-lg font-bold drop-shadow-lg">{activeTask.name}</p>
-                  <div className="bg-black/60 backdrop-blur-sm px-2.5 py-1 text-[10px] uppercase tracking-widest text-[#C9A84C] border border-[#C9A84C]/20 rounded-lg flex-shrink-0 ml-2">
-                    {VIP_LEVELS.find(v => v.key === activeLevel)?.name}
-                  </div>
-                </div>
-              </div>
-              <div className="p-5">
-                <p className="text-white text-base font-semibold mb-1">{activeTask.question}</p>
-                <p className="text-neutral-600 text-xs italic mb-5">{activeTask.desc}</p>
-                {processing ? (
-                  <div className="space-y-3">
-                    <div className="flex justify-between text-[10px] uppercase tracking-widest text-[#C9A84C]">
-                      <span>A analisar tendência...</span><span>{progress}%</span>
-                    </div>
-                    <div className="w-full h-2 bg-white/5 overflow-hidden rounded-full">
-                      <div className="h-full bg-[#C9A84C] rounded-full" style={{ width: `${progress}%`, transition: "width 0.1s linear" }} />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    <button onClick={() => handleVote(false)}
-                      className="flex items-center justify-center gap-2 p-4 border border-red-500/20 hover:bg-red-500/5 transition-all group rounded-xl">
-                      <X size={20} className="text-red-500/50 group-hover:text-red-500 transition-colors" />
-                      <span className="text-[11px] uppercase tracking-wider text-red-500/60 group-hover:text-red-500">Não Gosto</span>
-                    </button>
-                    <button onClick={() => handleVote(true)}
-                      className="flex items-center justify-center gap-2 p-4 border border-green-500/20 hover:bg-green-500/5 transition-all group rounded-xl">
-                      <Heart size={20} className="text-green-500/50 group-hover:text-green-500 transition-colors" />
-                      <span className="text-[11px] uppercase tracking-wider text-green-500/60 group-hover:text-green-500">Gosto</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <div>
         <h1 className="text-xl font-serif text-white">Investir</h1>
         <p className="text-[10px] text-neutral-600 uppercase tracking-widest mt-0.5">
@@ -728,15 +613,14 @@ function InvestView({ user, setView }: { user: any, setView: (v: AppState) => vo
         </p>
       </div>
 
+
+
       {VIP_LEVELS.map((v, idx) => {
         const owned = user.ownedVips?.includes(v.key);
         const cover = VIP_COVERS[idx % VIP_COVERS.length];
         const look = FASHION_LOOKS[(idx * 5 + 2) % FASHION_LOOKS.length];
         const canAfford = (user.balance || 0) >= v.cost;
         const isLoading = purchasing === v.key;
-        const done = dailyCounts[v.key] || 0;
-        const allTasksDone = done >= v.tasks;
-
         return (
           <motion.div key={v.key} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.06 }}
             className="bg-[#111] border border-white/6 rounded-2xl overflow-hidden">
@@ -754,20 +638,14 @@ function InvestView({ user, setView }: { user: any, setView: (v: AppState) => vo
                       {v.ico} {v.name}
                     </div>
                   </div>
-                  {/* Status badge */}
-                  {owned && allTasksDone && (
-                    <span className="text-[9px] border border-green-500/30 text-green-400/70 px-2 py-1 uppercase tracking-wider rounded">✓ Concluído hoje</span>
-                  )}
-                  {owned && !allTasksDone && (
-                    <span className="text-[9px] border border-[#C9A84C]/40 text-[#C9A84C] px-2 py-1 uppercase tracking-wider rounded">{done}/{v.tasks} feitas</span>
-                  )}
-                  {!owned && v.cost > 0 && !canAfford && (
+                  {owned ? (
+                    <span className="text-[9px] border border-green-500/50 text-green-500 px-2 py-1 uppercase tracking-wider rounded">Activo</span>
+                  ) : v.cost > 0 && !canAfford ? (
                     <span className="text-[9px] border border-red-500/30 text-red-400/70 px-2 py-1 uppercase tracking-wider rounded">Saldo insuf.</span>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>
-
             {/* Stats */}
             <div className="grid grid-cols-3 divide-x divide-white/5 border-t border-white/5">
               {[
@@ -781,61 +659,40 @@ function InvestView({ user, setView }: { user: any, setView: (v: AppState) => vo
                 </div>
               ))}
             </div>
-
-            {/* Action button */}
-            <div className="border-t border-white/5 px-4 py-3 space-y-2">
-              {/* Error message */}
-              {msg && !msg.ok && msg.vip === v.key && (
-                <div className="flex items-center gap-2 bg-red-500/8 border border-red-500/20 px-3 py-2 rounded-xl">
-                  <AlertTriangle size={11} className="text-red-400 flex-shrink-0" />
-                  <p className="text-[10px] text-red-400 flex-1">{msg.text}</p>
-                  <button onClick={() => { setMsg(null); setView("finances"); }}
-                    className="text-[#C9A84C] text-[9px] uppercase tracking-wider underline whitespace-nowrap flex-shrink-0">
-                    Recarregar
-                  </button>
-                </div>
-              )}
-              {/* Success message */}
-              {msg && msg.ok && msg.vip === v.key && (
-                <p className="text-[10px] text-green-400 flex items-center gap-1.5">
-                  <CheckCircle2 size={11} /> {msg.text}
-                </p>
-              )}
-
-              {/* NOT owned + free (estagiario) → already handled at account level */}
-              {!owned && v.cost === 0 && (
-                <button onClick={() => openTask(v.key)}
-                  style={{ background: cover.accent }}
-                  className="w-full py-2.5 text-black text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all rounded-xl flex items-center justify-center gap-2">
-                  <Play size={12} /> Fazer Tarefas
-                </button>
-              )}
-
-              {/* NOT owned + has cost → BUY */}
-              {!owned && v.cost > 0 && (
-                <button onClick={() => handlePurchase(v)} disabled={isLoading}
-                  style={{ background: canAfford ? cover.accent : undefined }}
-                  className={`w-full py-2.5 text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all rounded-xl disabled:opacity-60 ${canAfford ? "text-black" : "border border-white/10 text-neutral-500"}`}>
-                  {isLoading ? "Processando..." : canAfford ? `Comprar · MT ${v.cost.toLocaleString()}` : `Comprar · MT ${v.cost.toLocaleString()}`}
-                </button>
-              )}
-
-              {/* OWNED → FAZER TAREFAS (or all done message) */}
-              {owned && v.key !== "estagiario" && (
-                allTasksDone ? (
-                  <div className="text-center py-2">
-                    <p className="text-[10px] text-green-400/70 uppercase tracking-wider">✓ Tarefas de hoje concluídas</p>
-                    <p className="text-[9px] text-neutral-600 mt-0.5">Volte amanhã para mais tarefas</p>
+            {!owned && v.cost > 0 && (
+              <div className="border-t border-white/5 px-4 py-3 space-y-2">
+                {msg && !msg.ok && msg.vip === v.key && (
+                  <div className="flex items-center gap-2 bg-red-500/8 border border-red-500/20 px-3 py-2 rounded-xl">
+                    <AlertTriangle size={11} className="text-red-400 flex-shrink-0" />
+                    <p className="text-[10px] text-red-400 flex-1">Saldo insuficiente — faltam {(v.cost - (user.balance || 0)).toFixed(0)} MZN</p>
+                    <button onClick={() => { setMsg(null); setView("finances"); }}
+                      className="text-[#C9A84C] text-[9px] uppercase tracking-wider underline whitespace-nowrap flex-shrink-0">
+                      Recarregar
+                    </button>
                   </div>
-                ) : (
-                  <button onClick={() => openTask(v.key)}
-                    style={{ background: cover.accent }}
-                    className="w-full py-2.5 text-black text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all rounded-xl flex items-center justify-center gap-2">
-                    <Play size={12} /> Fazer Tarefas · {done}/{v.tasks} hoje
-                  </button>
-                )
-              )}
-            </div>
+                )}
+                <button
+                  onClick={() => handlePurchase(v)}
+                  disabled={isLoading}
+                  style={{ background: cover.accent }}
+                  className="w-full py-2.5 text-black text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all rounded-xl disabled:opacity-60">
+                  {isLoading ? "Processando..." : "Comprar"}
+                </button>
+              </div>
+            )}
+            {owned && v.key !== "estagiario" && (
+              <div className="border-t border-white/5 px-4 py-3 space-y-2">
+                {msg && msg.ok && msg.vip === v.key && (
+                  <p className="text-[10px] text-green-400 flex items-center gap-1.5">
+                    <CheckCircle2 size={11} /> Activado com sucesso!
+                  </p>
+                )}
+                <button onClick={() => setView("tasks")}
+                  className="w-full py-2.5 border border-green-500/30 text-green-400 text-[10px] font-bold uppercase tracking-widest hover:bg-green-500/8 transition-all rounded-xl flex items-center justify-center gap-2">
+                  Fazer Tarefas do {v.name}
+                </button>
+              </div>
+            )}
           </motion.div>
         );
       })}
@@ -847,120 +704,113 @@ function InvestView({ user, setView }: { user: any, setView: (v: AppState) => vo
 function ProfileView({ user, uid, setView }: { user: any, uid: string, setView: (v: AppState) => void }) {
   const [showAbout, setShowAbout] = useState(false);
 
-  const cover = VIP_COVERS[0];
-  const activeVips = VIP_LEVELS.filter(v => user.ownedVips?.includes(v.key) && v.key !== "estagiario");
-  const dailyPotential = VIP_LEVELS.filter(v => user.ownedVips?.includes(v.key)).reduce((s, v) => s + v.daily, 0);
-
   return (
-    <div className="p-4 space-y-4 pb-8">
+    <div className="p-4 space-y-4">
 
-      {/* ── ABOUT MODAL ── */}
+      {/* ── SOBRE NÓS MODAL ── */}
       <AnimatePresence>
         {showAbout && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/90 flex items-end justify-center"
+            className="fixed inset-0 z-50 bg-black/85 flex items-end justify-center"
             onClick={() => setShowAbout(false)}>
-            <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
-              onClick={e => e.stopPropagation()}
-              className="bg-[#111] border border-white/10 w-full max-w-lg rounded-t-3xl overflow-hidden max-h-[88vh] flex flex-col">
-
+            <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
+              className="bg-[#111] border border-white/10 w-full max-w-md rounded-t-3xl overflow-hidden"
+              onClick={e => e.stopPropagation()}>
               {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-white/8 flex-shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-[#C9A84C]/15 border border-[#C9A84C]/30 flex items-center justify-center">
-                    <Info size={14} className="text-[#C9A84C]" />
+              <div className="relative h-36 overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-br from-[#1a1a2e] to-[#C9A84C]/30" />
+                <div className="absolute inset-0 flex flex-col justify-end px-6 pb-5">
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="w-8 h-8 rounded-full bg-[#C9A84C] flex items-center justify-center">
+                      <span className="text-black font-bold text-sm">M</span>
+                    </div>
+                    <Logo />
                   </div>
-                  <h2 className="text-white font-serif text-lg">Sobre Nós</h2>
+                  <p className="text-white/50 text-[10px] uppercase tracking-widest">Plataforma de Avaliação de Moda · Moçambique</p>
                 </div>
                 <button onClick={() => setShowAbout(false)}
-                  className="w-7 h-7 flex items-center justify-center text-neutral-500 hover:text-white rounded-full hover:bg-white/8 transition-all">
-                  <X size={16} />
+                  className="absolute top-4 right-4 w-7 h-7 bg-white/10 rounded-full flex items-center justify-center text-white/60 hover:text-white transition-colors">
+                  <X size={14} />
                 </button>
               </div>
 
               {/* Content */}
-              <div className="overflow-y-auto p-6 space-y-5">
+              <div className="p-6 space-y-5 max-h-[60vh] overflow-y-auto">
 
-                {/* Headline */}
-                <div className="bg-gradient-to-br from-[#C9A84C]/10 to-transparent border border-[#C9A84C]/20 rounded-2xl p-5">
-                  <p className="text-[#C9A84C] text-xs font-bold uppercase tracking-widest mb-2">ModaRewards MZ</p>
-                  <p className="text-white text-sm leading-relaxed">
-                    Somos a primeira plataforma moçambicana onde a tua <span className="text-[#C9A84C] font-semibold">opinião sobre moda vale dinheiro real</span>.
-                    A tua avaliação chega directamente às marcas e designers, ajudando a definir as próximas colecções e tendências.
+                {/* O que somos */}
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-[#C9A84C] font-bold mb-2">O Que Somos</p>
+                  <p className="text-neutral-300 text-sm leading-relaxed">
+                    A <span className="text-white font-semibold">ModaRewards</span> é uma plataforma digital moçambicana que liga consumidores a marcas e empresas de moda. A nossa missão é simples: <span className="text-[#C9A84C]">a sua opinião tem valor real.</span>
                   </p>
                 </div>
 
-                {/* Mission */}
+                {/* Como funciona */}
                 <div>
-                  <p className="text-white font-semibold text-sm mb-2 flex items-center gap-2">
-                    <span className="text-base">🎯</span> A nossa missão
-                  </p>
-                  <p className="text-neutral-500 text-xs leading-relaxed">
-                    Conectamos o consumidor moçambicano às grandes marcas de moda. Cada "Gosto" ou "Não Gosto" que clicas é enviado como dados reais a fornecedores e marcas que querem saber o que o mercado prefere antes do próximo lançamento. A tua opinião é o produto.
-                  </p>
-                </div>
-
-                {/* How it works */}
-                <div>
-                  <p className="text-white font-semibold text-sm mb-3 flex items-center gap-2">
-                    <span className="text-base">⚙️</span> Como funciona
-                  </p>
+                  <p className="text-[10px] uppercase tracking-widest text-[#C9A84C] font-bold mb-3">Como Funciona</p>
                   <div className="space-y-3">
                     {[
-                      { n: "1", title: "Avalia looks", desc: "Vês uma imagem real de roupa e dizes se gostas ou não. Isso é tudo — simples e rápido." },
-                      { n: "2", title: "Ganhas MZN", desc: "Cada avaliação completada credita automaticamente o valor do teu nível no teu saldo." },
-                      { n: "3", title: "Evoluis de nível", desc: "Quanto maior o teu pacote VIP, mais tarefas por dia e maior o ganho por avaliação." },
-                      { n: "4", title: "Convidas amigos", desc: "Partilha o teu código e ganha 15% do que os teus convidados ganham — para sempre." },
-                      { n: "5", title: "Sacas o dinheiro", desc: "Pede o levantamento a partir de 90 MZN. Taxa de 8%. Recebe em M-Pesa ou E-Mola em até 24h." },
-                    ].map(s => (
-                      <div key={s.n} className="flex gap-3">
-                        <div className="w-6 h-6 rounded-full bg-[#C9A84C]/15 border border-[#C9A84C]/30 flex items-center justify-center text-[#C9A84C] text-[10px] font-bold flex-shrink-0 mt-0.5">
-                          {s.n}
-                        </div>
+                      { n: "1", title: "Avalie Looks", desc: "Analisa colecções, tendências e peças de roupa e dá a sua opinião autêntica." },
+                      { n: "2", title: "Dados para Empresas", desc: "As suas avaliações são agregadas anonimamente e enviadas a marcas e retalhistas para ajudar a decidir os próximos lançamentos." },
+                      { n: "3", title: "Ganhe em MZN", desc: "Por cada avaliação completada, recebe recompensas reais directamente na sua carteira digital." },
+                      { n: "4", title: "Evolua de Nível", desc: "Quanto maior o seu nível VIP, mais tarefas disponíveis e maior o rendimento diário." },
+                    ].map(item => (
+                      <div key={item.n} className="flex gap-3">
+                        <div className="w-6 h-6 rounded-full bg-[#C9A84C]/15 border border-[#C9A84C]/25 flex items-center justify-center text-[#C9A84C] text-[10px] font-bold flex-shrink-0 mt-0.5">{item.n}</div>
                         <div>
-                          <p className="text-white text-xs font-semibold mb-0.5">{s.title}</p>
-                          <p className="text-neutral-500 text-xs leading-relaxed">{s.desc}</p>
+                          <p className="text-white text-sm font-semibold">{item.title}</p>
+                          <p className="text-neutral-500 text-xs mt-0.5 leading-relaxed">{item.desc}</p>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* Levels table */}
+                {/* Porquê a sua opinião importa */}
+                <div className="bg-[#C9A84C]/5 border border-[#C9A84C]/15 p-4 rounded-2xl">
+                  <p className="text-[10px] uppercase tracking-widest text-[#C9A84C] font-bold mb-2">Porquê a Sua Opinião Importa</p>
+                  <p className="text-neutral-400 text-xs leading-relaxed">
+                    As empresas de moda gastam milhões a tentar perceber o que os consumidores querem. A ModaRewards resolve isso directamente — conectando marcas com pessoas reais em Moçambique para validar tendências <span className="text-white">antes do lançamento</span>. Você é o painel de consultores que decide o que chega às lojas.
+                  </p>
+                </div>
+
+                {/* Regras importantes */}
                 <div>
-                  <p className="text-white font-semibold text-sm mb-3 flex items-center gap-2">
-                    <span className="text-base">💎</span> Tabela de níveis
-                  </p>
-                  <div className="bg-[#0d0d0d] border border-white/5 rounded-xl overflow-hidden">
-                    {VIP_LEVELS.map((v, idx) => (
-                      <div key={v.key} className={`flex items-center justify-between px-4 py-3 ${idx < VIP_LEVELS.length - 1 ? "border-b border-white/5" : ""}`}>
-                        <div className="flex items-center gap-2">
-                          <span className="text-base">{v.ico}</span>
-                          <div>
-                            <p className="text-white text-xs font-medium">{v.name}</p>
-                            <p className="text-neutral-600 text-[9px]">{v.cost === 0 ? "Grátis · 2 dias" : `MT ${v.cost.toLocaleString()}`}</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[#C9A84C] text-xs font-bold">{v.daily} MZN/dia</p>
-                          <p className="text-neutral-600 text-[9px]">{v.tasks} tarefas</p>
-                        </div>
+                  <p className="text-[10px] uppercase tracking-widest text-[#C9A84C] font-bold mb-2">Regras Importantes</p>
+                  <div className="space-y-1.5">
+                    {[
+                      "Saque mínimo: 90 MZN",
+                      "Taxa de processamento: 8% por levantamento",
+                      "Estagiário: 2 dias gratuitos, depois é necessário activar um plano",
+                      "Tarefas repõem diariamente à meia-noite",
+                      "Bónus de referido: 15% automático por cada tarefa do convidado",
+                    ].map(r => (
+                      <div key={r} className="flex items-start gap-2">
+                        <div className="w-1 h-1 rounded-full bg-[#C9A84C]/50 mt-1.5 flex-shrink-0" />
+                        <p className="text-neutral-500 text-xs">{r}</p>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* Trust note */}
-                <div className="bg-[#0d0d0d] border border-white/5 rounded-2xl p-4">
-                  <p className="text-[10px] uppercase tracking-widest text-neutral-600 mb-2">⚠️ Nota importante</p>
-                  <p className="text-xs text-neutral-600 leading-relaxed">
-                    Os ganhos dependem das tarefas disponíveis no teu nível. O sistema é reposto diariamente à meia-noite. Todos os levantamentos estão sujeitos a uma taxa de processamento de 8%. Usa a plataforma de forma responsável.
-                  </p>
+                {/* Contacto */}
+                <div className="border-t border-white/5 pt-4">
+                  <p className="text-[10px] uppercase tracking-widest text-neutral-600 mb-2">Suporte & Contacto</p>
+                  <a href="https://wa.me/258840000000" target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-3 bg-green-500/10 border border-green-500/20 p-3 rounded-xl hover:bg-green-500/15 transition-all">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className="text-green-400 flex-shrink-0"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                    <div>
+                      <p className="text-green-400 text-xs font-bold">WhatsApp · Suporte 24h</p>
+                      <p className="text-neutral-600 text-[10px]">Fala connosco para qualquer dúvida</p>
+                    </div>
+                  </a>
                 </div>
+              </div>
 
+              <div className="px-6 pb-6">
                 <button onClick={() => setShowAbout(false)}
-                  className="w-full py-3.5 bg-[#C9A84C] text-black font-bold text-xs uppercase tracking-widest rounded-2xl hover:bg-yellow-400 transition-all">
-                  Entendido — Fechar
+                  className="w-full py-3.5 bg-[#C9A84C] text-black font-bold text-sm uppercase tracking-widest rounded-2xl">
+                  Fechar
                 </button>
               </div>
             </motion.div>
@@ -968,55 +818,30 @@ function ProfileView({ user, uid, setView }: { user: any, uid: string, setView: 
         )}
       </AnimatePresence>
 
-      {/* ── PROFILE HEADER ── */}
-      <div className="bg-[#111] border border-white/6 rounded-2xl overflow-hidden">
-        {/* Top gradient bar */}
-        <div className="h-20 bg-gradient-to-br from-[#1a1a2e] to-[#C9A84C]/20 relative">
-          {/* Info button top right */}
-          <button onClick={() => setShowAbout(true)}
-            className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/15 flex items-center justify-center hover:border-[#C9A84C]/50 transition-all group">
-            <Info size={14} className="text-white/60 group-hover:text-[#C9A84C] transition-colors" />
-          </button>
+      {/* Avatar + info */}
+      <div className="bg-[#111] border border-white/6 rounded-2xl p-5 flex items-center gap-4">
+        <div className="w-16 h-16 rounded-full bg-[#C9A84C]/15 border border-[#C9A84C]/30 flex items-center justify-center text-2xl font-bold text-[#C9A84C] flex-shrink-0">
+          {user.displayName?.slice(0, 2).toUpperCase()}
         </div>
-
-        {/* Avatar overlapping the bar */}
-        <div className="px-5 pb-5 -mt-8">
-          <div className="w-16 h-16 rounded-full bg-[#C9A84C]/15 border-2 border-[#111] ring-2 ring-[#C9A84C]/40 flex items-center justify-center text-2xl font-bold text-[#C9A84C] mb-3">
-            {user.displayName?.slice(0, 2).toUpperCase()}
-          </div>
-          <p className="text-white text-lg font-serif font-bold">{user.displayName}</p>
+        <div className="flex-1 min-w-0">
+          <p className="text-white text-lg font-serif font-bold truncate">{user.displayName}</p>
           <p className="text-neutral-500 text-sm font-mono">+258 {user.phoneNumber}</p>
-          <div className="flex items-center gap-2 mt-2">
-            <span className="text-[9px] bg-[#C9A84C]/10 border border-[#C9A84C]/20 text-[#C9A84C] px-2 py-0.5 rounded-lg font-mono font-bold">{user.refCode}</span>
-            {activeVips.length > 0 && (
-              <span className="text-[9px] bg-green-500/10 border border-green-500/20 text-green-400 px-2 py-0.5 rounded-lg">
-                {activeVips.map(v => v.name).join(" + ")}
-              </span>
-            )}
-          </div>
+          <p className="text-[#C9A84C] text-xs mt-1 font-mono font-bold">{user.refCode}</p>
         </div>
+        {/* Sobre Nós button — top right */}
+        <button onClick={() => setShowAbout(true)}
+          className="flex-shrink-0 flex flex-col items-center gap-1 px-3 py-2 border border-white/10 hover:border-[#C9A84C]/30 hover:bg-[#C9A84C]/5 transition-all rounded-xl">
+          <Info size={15} className="text-[#C9A84C]" />
+          <span className="text-[8px] uppercase tracking-widest text-neutral-500 whitespace-nowrap">Sobre Nós</span>
+        </button>
       </div>
 
-      {/* ── STATS ── */}
-      <div className="grid grid-cols-3 gap-2">
-        {[
-          { label: "Saldo", val: `${user.balance?.toFixed(0)} MZN`, color: "text-[#C9A84C]" },
-          { label: "Potencial/dia", val: `${dailyPotential} MZN`, color: "text-white" },
-          { label: "Convidados", val: `${user.totalReferrals || 0}`, color: "text-white" },
-        ].map(item => (
-          <div key={item.label} className="bg-[#111] border border-white/6 rounded-2xl p-3.5 text-center">
-            <p className={`text-xl font-serif font-bold ${item.color}`}>{item.val}</p>
-            <p className="text-[9px] text-neutral-600 uppercase tracking-wider mt-0.5">{item.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* ── BALANCE DETAIL ── */}
+      {/* Balance summary */}
       <div className="bg-[#111] border border-white/6 rounded-2xl divide-y divide-white/5">
         {[
           { label: "Saldo Total", val: `${user.balance?.toFixed(2)} MZN`, color: "text-[#C9A84C]" },
           { label: "Ganhos de Referidos", val: `${(user.referralEarnings || 0).toFixed(2)} MZN`, color: "text-white" },
-          { label: "Potencial Diário", val: `${dailyPotential} MZN`, color: "text-white" },
+          { label: "Total de Convidados", val: `${user.totalReferrals || 0} pessoas`, color: "text-white" },
         ].map(item => (
           <div key={item.label} className="flex justify-between items-center px-5 py-3.5">
             <span className="text-neutral-500 text-sm">{item.label}</span>
@@ -1025,79 +850,40 @@ function ProfileView({ user, uid, setView }: { user: any, uid: string, setView: 
         ))}
       </div>
 
-      {/* ── ACTIVE VIPS ── */}
-      {activeVips.length > 0 && (
-        <div>
-          <p className="text-[9px] uppercase tracking-widest text-neutral-600 mb-3">Pacotes Activos</p>
-          <div className="grid grid-cols-2 gap-2">
-            {activeVips.map(v => {
-              const c = VIP_COVERS[VIP_LEVELS.indexOf(v) % VIP_COVERS.length];
-              return (
-                <div key={v.key} className="flex items-center gap-3 bg-[#111] border border-white/6 rounded-2xl p-3.5">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0" style={{ background: c.bg }}>
-                    {v.ico}
-                  </div>
-                  <div>
-                    <p className="text-white text-sm font-semibold">{v.name}</p>
-                    <p className="text-[10px]" style={{ color: c.accent }}>{v.daily} MZN/dia</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      {/* VIPs activos */}
+      <div>
+        <p className="text-[9px] uppercase tracking-widest text-neutral-600 mb-3">Pacotes Activos</p>
+        <div className="flex flex-wrap gap-2">
+          {user.ownedVips?.map((vk: string) => {
+            const v = VIP_LEVELS.find(l => l.key === vk);
+            if (!v) return null;
+            const cover = VIP_COVERS[VIP_LEVELS.indexOf(v) % VIP_COVERS.length];
+            return (
+              <div key={vk} className="flex items-center gap-2 px-3 py-2 rounded-xl border border-white/8 bg-[#141414]">
+                <span className="text-base">{v.ico}</span>
+                <span style={{ color: cover.accent }} className="text-xs font-bold">{v.name}</span>
+              </div>
+            );
+          })}
         </div>
-      )}
+      </div>
 
-      {/* ── QUICK ACTIONS ── */}
+      {/* Actions */}
       <div className="space-y-2">
-        <button onClick={() => setShowAbout(true)}
-          className="w-full flex items-center justify-between px-4 py-4 bg-[#111] border border-[#C9A84C]/15 rounded-2xl hover:border-[#C9A84C]/40 transition-all group">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-[#C9A84C]/10 flex items-center justify-center">
-              <Info size={15} className="text-[#C9A84C]" />
-            </div>
-            <div className="text-left">
-              <p className="text-white text-sm font-medium">Sobre Nós & Como Funciona</p>
-              <p className="text-neutral-600 text-[10px]">A tua opinião chega às marcas</p>
-            </div>
-          </div>
-          <ChevronRight size={16} className="text-neutral-600 group-hover:text-[#C9A84C] transition-colors" />
-        </button>
-
         <button onClick={() => setView("finances")}
-          className="w-full flex items-center justify-between px-4 py-4 bg-[#111] border border-white/6 rounded-2xl hover:border-[#C9A84C]/30 transition-all group">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center">
-              <Wallet size={15} className="text-neutral-400" />
-            </div>
-            <p className="text-white text-sm">Depósito / Saque</p>
-          </div>
+          className="w-full flex items-center justify-between px-4 py-4 bg-[#111] border border-white/6 rounded-2xl hover:border-[#C9A84C]/30 transition-all">
+          <span className="text-white text-sm">Depósito / Saque</span>
           <ChevronRight size={16} className="text-neutral-600" />
         </button>
-
         <button onClick={() => setView("referral")}
-          className="w-full flex items-center justify-between px-4 py-4 bg-[#111] border border-white/6 rounded-2xl hover:border-[#C9A84C]/30 transition-all group">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center">
-              <Gift size={15} className="text-neutral-400" />
-            </div>
-            <div className="text-left">
-              <p className="text-white text-sm">Convidar Amigos</p>
-              <p className="text-neutral-600 text-[10px]">Código: {user.refCode}</p>
-            </div>
-          </div>
+          className="w-full flex items-center justify-between px-4 py-4 bg-[#111] border border-white/6 rounded-2xl hover:border-[#C9A84C]/30 transition-all">
+          <span className="text-white text-sm">Convidar Amigos</span>
           <ChevronRight size={16} className="text-neutral-600" />
         </button>
-
         <button onClick={() => signOut(auth)}
-          className="w-full flex items-center justify-between px-4 py-4 bg-[#111] border border-red-500/15 rounded-2xl hover:bg-red-500/5 transition-all">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-red-500/8 flex items-center justify-center">
-              <LogOut size={15} className="text-red-400" />
-            </div>
-            <p className="text-red-400 text-sm">Terminar Sessão</p>
-          </div>
-          <ChevronRight size={16} className="text-red-400/40" />
+          className="w-full flex items-center justify-between px-4 py-4 bg-[#111] border border-red-500/20 rounded-2xl hover:bg-red-500/5 transition-all">
+          <span className="text-red-400 text-sm">Terminar Sessão</span>
+          <LogOut size={16} className="text-red-400/50" />
         </button>
       </div>
     </div>
@@ -1212,10 +998,10 @@ function TaskCenter({ user, userData, setView }: { user: FirebaseUser, userData:
       <AnimatePresence>
         {activeTask && activeLevel && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 bg-black/90 flex items-end justify-center">
+            className="fixed inset-0 z-40 bg-black/90 flex flex-col justify-end" style={{ paddingBottom: "80px" }}>
             <motion.div initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
-              className="bg-[#111] border border-white/10 w-full max-w-md overflow-hidden rounded-t-3xl">
-              <div className="relative overflow-hidden bg-[#0a0a0a]" style={{ height: "260px" }}>
+              className="bg-[#111] border border-white/10 w-full max-w-md overflow-hidden rounded-2xl mx-3 mb-2">
+              <div className="relative overflow-hidden bg-[#0a0a0a]" style={{ height: "210px" }}>
                 <img src={activeTask.img} alt={activeTask.name} className="w-full h-full object-cover"
                   onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
@@ -1228,7 +1014,7 @@ function TaskCenter({ user, userData, setView }: { user: FirebaseUser, userData:
               </div>
               <div className="p-5">
                 <p className="text-white text-base font-semibold mb-1">{activeTask.question}</p>
-                <p className="text-neutral-600 text-xs italic mb-5">{activeTask.desc}</p>
+                <p className="text-neutral-600 text-xs italic mb-4">{activeTask.desc}</p>
                 {processing ? (
                   <div className="space-y-3">
                     <div className="flex justify-between text-[10px] uppercase tracking-widest text-[#C9A84C]">
@@ -1243,14 +1029,14 @@ function TaskCenter({ user, userData, setView }: { user: FirebaseUser, userData:
                 ) : (
                   <div className="grid grid-cols-2 gap-3">
                     <button onClick={() => handleVote(false)}
-                      className="flex items-center justify-center gap-2 p-4 border border-red-500/20 hover:bg-red-500/8 transition-all group rounded-2xl">
-                      <X size={22} className="text-red-400/60 group-hover:text-red-400 transition-colors" />
-                      <span className="text-[11px] uppercase tracking-wider text-red-400/60 group-hover:text-red-400">Não Gosto</span>
+                      className="flex items-center justify-center gap-3 py-5 border-2 border-red-500/40 bg-red-500/8 hover:bg-red-500/18 active:scale-95 transition-all rounded-2xl">
+                      <X size={26} className="text-red-400" />
+                      <span className="text-sm font-bold uppercase tracking-wide text-red-400">Não Gosto</span>
                     </button>
                     <button onClick={() => handleVote(true)}
-                      className="flex items-center justify-center gap-2 p-4 border border-[#C9A84C]/20 hover:bg-[#C9A84C]/8 transition-all group rounded-2xl">
-                      <Heart size={22} className="text-[#C9A84C]/60 group-hover:text-[#C9A84C] transition-colors" />
-                      <span className="text-[11px] uppercase tracking-wider text-[#C9A84C]/60 group-hover:text-[#C9A84C]">Gosto</span>
+                      className="flex items-center justify-center gap-3 py-5 border-2 border-[#C9A84C]/40 bg-[#C9A84C]/8 hover:bg-[#C9A84C]/18 active:scale-95 transition-all rounded-2xl">
+                      <Heart size={26} className="text-[#C9A84C]" />
+                      <span className="text-sm font-bold uppercase tracking-wide text-[#C9A84C]">Gosto</span>
                     </button>
                   </div>
                 )}
