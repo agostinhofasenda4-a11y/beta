@@ -1,6 +1,6 @@
 export const PAYMENT_DETAILS = {
-  mpesa: { number: "84 123 4567", name: "MODA REWARDS LTDA" },
-  emola: { number: "87 987 6543", name: "MODA REWARDS AGENTE" }
+  mpesa: { number: "84 887 3489", name: "QUELTON M******A" },
+  emola: { number: "87 311 9062", name: "QUELTON CESAR CHABUCA MUNALINAIUA" }
 };
 
 export const ADMIN_CREDENTIALS = {
