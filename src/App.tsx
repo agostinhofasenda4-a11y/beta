@@ -783,7 +783,7 @@ function ProfileView({ user, uid, setView }: { user: any, uid: string, setView: 
                       "Taxa de processamento: 8% por levantamento",
                       "Estagiário: 2 dias gratuitos, depois é necessário activar um plano",
                       "Tarefas repõem diariamente à meia-noite",
-                      "Bónus de referido: 15% automático por cada tarefa do convidado",
+                      "Bónus de referido: 15% automático por cada recarga do convidado",
                     ].map(r => (
                       <div key={r} className="flex items-start gap-2">
                         <div className="w-1 h-1 rounded-full bg-[#C9A84C]/50 mt-1.5 flex-shrink-0" />
@@ -1215,7 +1215,7 @@ function ReferralCenter({ user, uid }: { user: any, uid: string }) {
     <div className="p-4 space-y-4">
       <div>
         <h1 className="text-2xl font-serif text-white">Convidar Amigos</h1>
-        <p className="text-neutral-600 text-xs mt-1">Ganhe 15% de bónus cada vez que o seu convidado faz uma tarefa</p>
+        <p className="text-neutral-600 text-xs mt-1">Ganhe 15% de bónus cada vez que o seu convidado recarrega</p>
       </div>
       <div className="grid grid-cols-3 gap-2">
         {[["1", "Partilhe o link"], ["2", "Amigo regista-se"], ["3", "Recebe 15% auto"]].map(([n, t]) => (
@@ -1553,6 +1553,18 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
     await updateDoc(doc(db, "users", dep.userId), {
       balance: increment(dep.amount)
     });
+    // Pay 15% referral bonus to whoever referred this user on deposit approval
+    try {
+      const userSnap = await getDoc(doc(db, "users", dep.userId));
+      const userData = userSnap.data();
+      if (userData?.referredBy) {
+        const bonus = Math.round(dep.amount * 0.15 * 100) / 100;
+        await updateDoc(doc(db, "users", userData.referredBy), {
+          balance: increment(bonus),
+          referralEarnings: increment(bonus)
+        });
+      }
+    } catch (_) {}
   };
 
   const rejectDeposit = (id: string) => updateDoc(doc(db, "deposits", id), { status: "rejected" });
