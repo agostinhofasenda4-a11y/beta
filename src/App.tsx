@@ -136,7 +136,7 @@ function AppShell({ currentView, setView, user, uid, firebaseUser }: {
           )}
           {currentView === "invest" && (
             <motion.div key="invest" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-              <InvestView user={user} setView={setView} />
+              <InvestView user={user} uid={uid} setView={setView} />
             </motion.div>
           )}
           {currentView === "tasks" && (
@@ -571,24 +571,20 @@ function HomeView({ user, setView, uid }: { user: any, setView: (v: AppState) =>
 }
 
 // ─── INVEST VIEW ──────────────────────────────────────────────────────────────
-function InvestView({ user, setView }: { user: any, setView: (v: AppState) => void }) {
+function InvestView({ user, uid, setView }: { user: any, uid: string, setView: (v: AppState) => void }) {
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; ok: boolean; vip?: string } | null>(null);
 
   const handlePurchase = async (v: typeof VIP_LEVELS[0]) => {
     if (purchasing) return;
-    // Check balance
     if ((user.balance || 0) < v.cost) {
       setMsg({ text: `Saldo insuficiente. Precisa de mais ${(v.cost - user.balance).toFixed(0)} MZN. Recarregue a sua conta.`, ok: false, vip: v.key });
       return;
     }
     setPurchasing(v.key);
     try {
-      const userRef = doc(db, "users", user.uid || "");
-      // Get current user uid from auth
-      const { currentUser } = auth;
-      if (!currentUser) throw new Error("Não autenticado");
-      const uRef = doc(db, "users", currentUser.uid);
+      if (!uid) throw new Error("Não autenticado");
+      const uRef = doc(db, "users", uid);
       const snap = await getDoc(uRef);
       const current: string[] = snap.data()?.ownedVips || [];
       if (!current.includes(v.key)) {
@@ -1197,9 +1193,22 @@ function ReferralCenter({ user, uid }: { user: any, uid: string }) {
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [referrals, setReferrals] = useState<any[]>([]);
-  const refCode = user.refCode || "—";
+  const [refCode, setRefCode] = useState<string>(user.refCode || "");
+
+  // Auto-generate refCode for old users who don't have one
+  useEffect(() => {
+    if (!user.refCode && uid) {
+      const generated = genRefCode(user.displayName || "MZ");
+      updateDoc(doc(db, "users", uid), { refCode: generated })
+        .then(() => setRefCode(generated))
+        .catch(() => {});
+    } else if (user.refCode) {
+      setRefCode(user.refCode);
+    }
+  }, [user.refCode, uid, user.displayName]);
+
   const siteUrl = window.location.origin;
-  const refLink = `${siteUrl}?ref=${refCode}`;
+  const refLink = refCode ? `${siteUrl}?ref=${refCode}` : "";
 
   useEffect(() => {
     const q = query(collection(db, "users"), where("referredBy", "==", uid));
@@ -1229,9 +1238,12 @@ function ReferralCenter({ user, uid }: { user: any, uid: string }) {
         <div className="p-5 border-b border-white/5">
           <p className="text-[9px] uppercase tracking-widest text-neutral-600 mb-3">Seu Código</p>
           <div className="flex items-center justify-between">
-            <span className="text-[#C9A84C] font-mono font-bold tracking-[0.3em] text-2xl">{refCode}</span>
-            <button onClick={() => copy(refCode, setCopied)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 border text-[10px] uppercase tracking-wider transition-all rounded-xl ${copied ? "border-green-500/40 text-green-500" : "border-white/10 text-neutral-500 hover:border-[#C9A84C]/30 hover:text-[#C9A84C]"}`}>
+            <span className="text-[#C9A84C] font-mono font-bold tracking-[0.3em] text-2xl">
+              {refCode || <span className="text-neutral-600 text-sm animate-pulse">A gerar...</span>}
+            </span>
+            <button onClick={() => refCode && copy(refCode, setCopied)}
+              disabled={!refCode}
+              className={`flex items-center gap-1.5 px-3 py-1.5 border text-[10px] uppercase tracking-wider transition-all rounded-xl ${copied ? "border-green-500/40 text-green-500" : "border-white/10 text-neutral-500 hover:border-[#C9A84C]/30 hover:text-[#C9A84C]"} disabled:opacity-40`}>
               {copied ? <><CheckCircle2 size={11} /> Copiado!</> : <><Copy size={11} /> Copiar</>}
             </button>
           </div>
@@ -1548,23 +1560,26 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   }, []);
 
   const approveDeposit = async (dep: any) => {
-    await updateDoc(doc(db, "deposits", dep.id), { status: "approved" });
-    // Credit the deposited amount to user's balance
-    await updateDoc(doc(db, "users", dep.userId), {
-      balance: increment(dep.amount)
-    });
-    // Pay 15% referral bonus to whoever referred this user on deposit approval
     try {
+      // 1. Marcar depósito como aprovado
+      await updateDoc(doc(db, "deposits", dep.id), { status: "approved", approvedAt: serverTimestamp() });
+      // 2. Creditar saldo ao utilizador
+      await updateDoc(doc(db, "users", dep.userId), {
+        balance: increment(dep.amount)
+      });
+      // 3. Pagar bónus de 15% ao referidor (sem descontar nada do utilizador)
       const userSnap = await getDoc(doc(db, "users", dep.userId));
-      const userData = userSnap.data();
-      if (userData?.referredBy) {
+      const uData = userSnap.data();
+      if (uData?.referredBy) {
         const bonus = Math.round(dep.amount * 0.15 * 100) / 100;
-        await updateDoc(doc(db, "users", userData.referredBy), {
+        await updateDoc(doc(db, "users", uData.referredBy), {
           balance: increment(bonus),
           referralEarnings: increment(bonus)
         });
       }
-    } catch (_) {}
+    } catch (err: any) {
+      alert("Erro ao aprovar depósito: " + err.message);
+    }
   };
 
   const rejectDeposit = (id: string) => updateDoc(doc(db, "deposits", id), { status: "rejected" });
