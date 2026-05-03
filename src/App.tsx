@@ -210,23 +210,14 @@ function Landing({ onAuth }: { onAuth: () => void }) {
 
         {/* Hero content */}
         <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-12 text-center">
-          <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-            className="inline-flex items-center gap-2 px-4 py-1.5 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-full mb-8">
-            <span className="w-1.5 h-1.5 bg-[#C9A84C] rounded-full animate-pulse" />
-            <span className="text-[10px] uppercase tracking-[0.2em] text-[#C9A84C] font-bold">Plataforma Premium · Moçambique</span>
-          </motion.div>
           <motion.h1 initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }}
-            className="text-5xl md:text-7xl font-serif font-light leading-[0.95] text-white mb-5">
+            className="text-5xl md:text-7xl font-serif font-light leading-[0.95] text-white mb-10">
             Vista.<br />Avalie.<br /><span className="text-[#C9A84C] italic">Ganhe.</span>
           </motion.h1>
-          <motion.p initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}
-            className="text-neutral-400 max-w-xs text-base font-light mb-10 leading-relaxed">
-            Avalie tendências de moda e ganhe rendimento real em MZN.
-          </motion.p>
           <motion.button initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}
             onClick={onAuth}
             className="px-10 py-4 bg-[#C9A84C] text-black font-bold uppercase tracking-[0.2em] hover:bg-yellow-400 transition-all text-sm rounded-full shadow-[0_0_30px_rgba(201,168,76,0.3)]">
-            Começar Gratuitamente
+            Começar
           </motion.button>
         </div>
       </div>
