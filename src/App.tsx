@@ -887,6 +887,11 @@ function TaskCenter({ user, userData, setView }: { user: FirebaseUser, userData:
   const [lastReward, setLastReward] = useState<number | null>(null);
   const [showReward, setShowReward] = useState(false);
   const [showHowTo, setShowHowTo] = useState(false);
+  // Lotaria estagiário
+  const [lotteryPhase, setLotteryPhase] = useState<"idle"|"countdown"|"result">("idle");
+  const [lotterySeconds, setLotterySeconds] = useState(180); // 3 minutos
+  const [lotteryWon, setLotteryWon] = useState<boolean | null>(null);
+  const lotteryRef = useRef<NodeJS.Timeout | null>(null);
   const today = format(new Date(), "yyyy-MM-dd");
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -904,6 +909,53 @@ function TaskCenter({ user, userData, setView }: { user: FirebaseUser, userData:
 
   const isEstagiarioOnly = userData.ownedVips?.length === 1 && userData.ownedVips[0] === "estagiario";
   const locked = isEstagiarioOnly && userData.estagiarioUsedDays >= 2;
+
+  // Iniciar countdown da lotaria automáticamente para estagiários
+  useEffect(() => {
+    if (!isEstagiarioOnly || locked) return;
+    const usedToday = dailyCounts["estagiario"] >= 1;
+    if (usedToday) return;
+    if (lotteryPhase === "idle") {
+      setLotteryPhase("countdown");
+      setLotterySeconds(180);
+    }
+  }, [isEstagiarioOnly, locked, dailyCounts]);
+
+  useEffect(() => {
+    if (lotteryPhase !== "countdown") return;
+    lotteryRef.current = setInterval(() => {
+      setLotterySeconds(s => {
+        if (s <= 1) {
+          clearInterval(lotteryRef.current!);
+          // Resultado aleatório — 40% chance de ganhar
+          const won = Math.random() < 0.4;
+          setLotteryWon(won);
+          setLotteryPhase("result");
+          if (won) {
+            // Creditar recompensa do estagiário
+            const level = VIP_LEVELS.find(v => v.key === "estagiario")!;
+            Promise.all([
+              addDoc(collection(db, "task_history"), {
+                userId: user.uid, date: today, levelKey: "estagiario",
+                reward: level.perTask, completedAt: serverTimestamp()
+              }),
+              updateDoc(doc(db, "users", user.uid), {
+                balance: increment(level.perTask), lastTaskDate: today,
+                estagiarioUsedDays: increment(1)
+              })
+            ]).catch(console.error);
+          } else {
+            updateDoc(doc(db, "users", user.uid), {
+              estagiarioUsedDays: increment(1)
+            }).catch(console.error);
+          }
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => { if (lotteryRef.current) clearInterval(lotteryRef.current); };
+  }, [lotteryPhase]);
   const ownedLevels = VIP_LEVELS.filter(v => userData.ownedVips?.includes(v.key));
 
   const startTask = (levelKey: string) => {
@@ -957,6 +1009,63 @@ function TaskCenter({ user, userData, setView }: { user: FirebaseUser, userData:
     } catch (e) { console.error(e); }
     setProcessing(false); setActiveTask(null); setActiveLevel(null);
   };
+
+  // Ecrã lotaria estagiário — countdown
+  if (isEstagiarioOnly && !locked && lotteryPhase === "countdown") {
+    const mins = Math.floor(lotterySeconds / 60);
+    const secs = lotterySeconds % 60;
+    const pct = ((180 - lotterySeconds) / 180) * 100;
+    return (
+      <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+        <div className="text-5xl mb-6">🎰</div>
+        <h2 className="text-2xl font-serif text-white mb-2">A preparar o teu resultado...</h2>
+        <p className="text-neutral-500 text-sm mb-10">Aguarda — o teu resultado de hoje está a ser gerado!</p>
+        {/* Círculo countdown */}
+        <div className="relative w-36 h-36 mb-8">
+          <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="44" fill="none" stroke="#1a1a1a" strokeWidth="8" />
+            <circle cx="50" cy="50" r="44" fill="none" stroke="#C9A84C" strokeWidth="8"
+              strokeDasharray={`${2 * Math.PI * 44}`}
+              strokeDashoffset={`${2 * Math.PI * 44 * (1 - pct / 100)}`}
+              strokeLinecap="round" style={{ transition: "stroke-dashoffset 1s linear" }} />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-3xl font-mono font-bold text-white">
+              {String(mins).padStart(2, "0")}:{String(secs).padStart(2, "0")}
+            </span>
+            <span className="text-[10px] text-neutral-600 uppercase tracking-wider mt-1">restantes</span>
+          </div>
+        </div>
+        <p className="text-neutral-700 text-xs">O resultado será revelado automaticamente</p>
+      </div>
+    );
+  }
+
+  // Ecrã resultado da lotaria
+  if (isEstagiarioOnly && lotteryPhase === "result") {
+    const level = VIP_LEVELS.find(v => v.key === "estagiario")!;
+    return (
+      <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+        <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring" }}>
+          <div className="text-7xl mb-6">{lotteryWon ? "🎉" : "😔"}</div>
+          <h2 className={`text-3xl font-serif font-bold mb-3 ${lotteryWon ? "text-[#C9A84C]" : "text-neutral-400"}`}>
+            {lotteryWon ? "Parabéns!" : "Não foi hoje..."}
+          </h2>
+          <p className="text-neutral-400 text-sm mb-2">
+            {lotteryWon
+              ? `Ganhou ${level.perTask} MZN hoje! O valor foi adicionado à sua carteira.`
+              : "Não ganhou hoje. Tente novamente amanhã ou active um plano VIP para ganhar todos os dias!"}
+          </p>
+          {!lotteryWon && (
+            <button onClick={() => setView("invest")}
+              className="mt-8 px-8 py-3 bg-[#C9A84C] text-black text-xs font-bold uppercase tracking-widest hover:bg-yellow-400 transition-all rounded-full">
+              Ver Pacotes VIP
+            </button>
+          )}
+        </motion.div>
+      </div>
+    );
+  }
 
   if (locked) return (
     <div className="flex flex-col items-center justify-center py-24 text-center px-6">
