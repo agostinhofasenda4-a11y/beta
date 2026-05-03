@@ -19,13 +19,13 @@ export type VipLevel = {
 };
 
 export const VIP_LEVELS: VipLevel[] = [
-  { key: 'estagiario', name: 'Estagiário', ico: '🌱', cost: 0, tasks: 1, daily: 15, perTask: 15 },
-  { key: 'vip1', name: 'VIP 1', ico: '⭐', cost: 600, tasks: 3, daily: 30, perTask: 10 },
-  { key: 'vip2', name: 'VIP 2', ico: '💫', cost: 1200, tasks: 5, daily: 80, perTask: 16 },
-  { key: 'vip3', name: 'VIP 3', ico: '💎', cost: 3400, tasks: 8, daily: 200, perTask: 25 },
-  { key: 'vip4', name: 'VIP 4', ico: '🏆', cost: 8500, tasks: 10, daily: 450, perTask: 45 },
-  { key: 'vip5', name: 'VIP 5', ico: '👑', cost: 18000, tasks: 12, daily: 750, perTask: 62.5 },
-  { key: 'vip6', name: 'VIP 6', ico: '💠', cost: 36000, tasks: 15, daily: 1200, perTask: 80 },
+  { key: 'estagiario', name: 'Estagiário', ico: '🌱', cost: 0,     tasks: 1,  daily: 10,   perTask: 10 },
+  { key: 'vip1',       name: 'VIP 1',      ico: '⭐', cost: 300,   tasks: 3,  daily: 45,   perTask: 15 },
+  { key: 'vip2',       name: 'VIP 2',      ico: '💫', cost: 800,   tasks: 5,  daily: 125,  perTask: 25 },
+  { key: 'vip3',       name: 'VIP 3',      ico: '💎', cost: 2000,  tasks: 8,  daily: 320,  perTask: 40 },
+  { key: 'vip4',       name: 'VIP 4',      ico: '🏆', cost: 5000,  tasks: 10, daily: 650,  perTask: 65 },
+  { key: 'vip5',       name: 'VIP 5',      ico: '👑', cost: 12000, tasks: 12, daily: 1200, perTask: 100 },
+  { key: 'vip6',       name: 'VIP 6',      ico: '💠', cost: 25000, tasks: 15, daily: 2250, perTask: 150 },
 ];
 
 export type FashionLook = {
